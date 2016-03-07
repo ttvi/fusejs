@@ -229,7 +229,7 @@ namespace NodeFuse {
 
         int argslen = args.Length();
         if (argslen == 0) {
-            Nan::ThrowTypeError( "You must specify 2 arguments to invoke this function");
+            Nan::ThrowTypeError( "You must specify at least 2 arguments to invoke this function");
         }
 
         if (!Buffer::HasInstance(args[0])) {
@@ -244,28 +244,20 @@ namespace NodeFuse {
         int ret = -1;
         size_t size = args[1]->IntegerValue();
 
-        if (reply->dentry_buffer == NULL){
-            // fprintf(stderr, "reply buf null\n");
-            Local<Object> buffer = args[0]->ToObject();
-            const char* data = Buffer::Data(buffer);
-            ret = fuse_reply_buf( reply->request, data, size);
-            reply->b_hasReplied = true;
-        }else{
-
-            if (reply->dentry_offset < reply->dentry_acc_size){
-                // fprintf(stderr, "reply buf less than %6d, %6d, \t%6d\n", (int) reply->dentry_offset, (int) reply->dentry_acc_size, (int) MIN(reply->dentry_acc_size - reply->dentry_offset,size));
-                ret = fuse_reply_buf(reply->request, reply->dentry_buffer + reply->dentry_offset, MIN(reply->dentry_acc_size - reply->dentry_offset,size) );
-                
-                /* even though it's not finished when we reached here, fuse will make a new request wuth a new reply */
-                reply->b_hasReplied = true;                
-            }else{
-                // fprintf(stderr, "reply buf done\n");
-                ret = fuse_reply_buf(reply->request, NULL, 0 );
+        if (args[2]->IsNumber()) {
+            if (args[2]->IntegerValue() == 0) {
+                ret = fuse_reply_buf(reply->request, reply->dentry_buffer, reply->dentry_acc_size);
+                reply->b_hasReplied = true;
+            } else {
+                Local<Object> buffer = args[0]->ToObject();
+                const char* data = Buffer::Data(buffer);
+                ret = fuse_reply_buf( reply->request, data, size);
                 reply->b_hasReplied = true;
             }
-
+        } else {
+            ret = fuse_reply_buf(reply->request, reply->dentry_buffer, reply->dentry_acc_size);
+            reply->b_hasReplied = true;
         }
-        // fprintf(stderr, "reply buf return %d\n", ret);
 
         if (ret == -1) {
             FUSEJS_THROW_EXCEPTION("Error replying operation: ", strerror(errno));
@@ -483,8 +475,8 @@ namespace NodeFuse {
             Nan::ThrowTypeError("You must specify the requested size number as second argument");
         }
 
-        if (!args[2]->IsObject()) {
-            Nan::ThrowTypeError("You must specify stat Object as third argument");
+        if (!args[2]->IsNumber()) {
+            Nan::ThrowTypeError("You must specify an inode number as third argument");
         }
 
         if (!args[3]->IsNumber()) {
@@ -499,31 +491,34 @@ namespace NodeFuse {
         char* buffer = reply->dentry_buffer;
 
         struct stat statbuff;
-        ObjectToStat(args[2]->ToObject(), &statbuff);
+        statbuff.st_ino = args[2]->IntegerValue();
         // fprintf(stderr, "stat\n");
 
         size_t acc_size = reply->dentry_acc_size;
 
         size_t len = fuse_add_direntry(reply->request, NULL, 0, *name, &statbuff, 0);
-        buffer = (char * )realloc(buffer, acc_size + len);
-        reply->dentry_buffer = buffer;
-        size_t len2 = fuse_add_direntry(reply->request, (char*) (buffer + acc_size),
-         requestedSize - acc_size,
-         *name, &statbuff, acc_size + len);
-        
-        // fprintf(stderr, "Current length! -> %d\n", (int)reply->dentry_cur_length);
-        // fprintf(stderr, "Entry name -> %s\n", (const char*) *name);
-        // fprintf(stderr, "Space needed for the entry -> %d or %d \n", (int) len, (int)len2);
-        // fprintf(stderr, "Requested size -> %d\n", (int) requestedSize);
-        // fprintf(stderr, "Remaning buffer -> %d\n", (int)(requestedSize - acc_size));
-        // fprintf(stderr, "Offset -> %lld\n\n", offset );        
-        // fprintf(stderr, "Actual Size -> %d\n", (int) acc_size );        
+        if (requestedSize < acc_size + len) {
+            args.GetReturnValue().Set(Nan::New<Number>(0));
+        } else {
+            buffer = (char * )realloc(buffer, acc_size + len);
+            reply->dentry_buffer = buffer;
+            fuse_add_direntry(reply->request, (char*) (buffer + acc_size),
+                    requestedSize - acc_size,
+                    *name, &statbuff, offset);
 
-        reply->dentry_acc_size += len;
-        reply->dentry_cur_length++;
+            // fprintf(stderr, "Current length! -> %d\n", (int)reply->dentry_cur_length);
+            // fprintf(stderr, "Entry name -> %s\n", (const char*) *name);
+            // fprintf(stderr, "Space needed for the entry -> %d or %d \n", (int) len, (int)len2);
+            // fprintf(stderr, "Requested size -> %d\n", (int) requestedSize);
+            // fprintf(stderr, "Remaning buffer -> %d\n", (int)(requestedSize - acc_size));
+            // fprintf(stderr, "Offset -> %lld\n\n", offset );        
+            // fprintf(stderr, "Actual Size -> %d\n", (int) acc_size );        
 
-        // scope.Escape(Nan::New<Number>( (int) len2) );
-        args.GetReturnValue().Set(Nan::New<Number>( (int) len2));
+            reply->dentry_acc_size += len;
+            reply->dentry_cur_length++;
+
+            args.GetReturnValue().Set(Nan::New<Number>( (int) len));
+        }
     }
     
     NAN_GETTER(Reply::hasReplied){

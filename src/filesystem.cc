@@ -1076,17 +1076,19 @@ namespace NodeFuse {
         // }
 
         value.op = _FUSE_OPS_SYMLINK_;
+        value.req = req;
         value.name = strdup(link);
         value.ino = parent;
         value.newname = strdup(name);
 
-
         bool result = ring_buffer.produce(value);//(producers[ 0/*_FUSE_OPS_SYMLINK_*/ ]);
+
         while( !result){
             //the queue was full
             uv_async_send(&uv_async_handle);
             result = ring_buffer.produce(value);
         }
+
         uv_async_send(&uv_async_handle);
 
     }
