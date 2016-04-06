@@ -170,6 +170,7 @@ namespace NodeFuse {
         for (int i = 0; i < argc; i++) {
             v8::String::Utf8Value option(Nan::Get(options, Nan::New<Integer>( static_cast<uint32_t>(i)) ).ToLocalChecked()->ToString() );
             char *fopt = strdup(*option);
+            if (i) fuse_unmount(fopt, NULL);
             if (fuse_opt_add_arg(fuse->fargs, (const char *) fopt) == -1) {
                 FUSEJS_THROW_EXCEPTION("Unable to allocate memory, fuse_opt_add_arg failed: ", strerror(errno));
                 return;
